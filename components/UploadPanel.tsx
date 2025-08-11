@@ -3,12 +3,7 @@ import * as Papa from 'papaparse'
 import { getStorage } from '../lib/storage/factory'
 import { buildPlanFromCSV } from '../lib/guardrails'
 
-type PlanMeta = {
-  filename: string
-  assumption: string | null
-  items: { include: string[]; exclude: string[] }
-  uploaded_at: string
-} | null
+import type { PlanMeta } from '../lib/storage/types'
 
 type CSVRow = Record<string, string | number>
 
