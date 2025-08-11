@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import * as Papa from 'papaparse'
+import { getStorage } from '../lib/storage/factory'
+import { buildPlanFromCSV } from '../lib/guardrails'
 
 type PlanMeta = {
   filename: string
@@ -7,9 +10,13 @@ type PlanMeta = {
   uploaded_at: string
 } | null
 
-export default function UploadPanel({ onPlanSaved }:{ onPlanSaved: ()=>Promise<void>|void }) {
+type CSVRow = Record<string, string | number>
+
+export default function UploadPanel({ onPlanSaved }: { onPlanSaved: () => Promise<void> | void }) {
   const fileRef = useRef<HTMLInputElement>(null)
+
   const [csvText, setCsvText] = useState('')
+  const [parsedRows, setParsedRows] = useState<any[]>([])
   const [filename, setFilename] = useState('')
 
   const [items, setItems] = useState<string[]>([])
@@ -22,15 +29,25 @@ export default function UploadPanel({ onPlanSaved }:{ onPlanSaved: ()=>Promise<v
 
   const [lastMeta, setLastMeta] = useState<PlanMeta>(null)
 
-  // Load last meta on mount (prefill assumption + selections)
+  // Load last saved meta (from whichever storage mode is active)
   useEffect(() => {
     (async () => {
-      const data = await fetch('/api/plan').then(r => r.json()).catch(() => null)
-      if (data?.meta) {
-        setLastMeta(data.meta)
-        if (data.meta.assumption) setAssumption(data.meta.assumption)
-        if (data.meta.items?.include) setIncludeItems(data.meta.items.include)
-        if (data.meta.items?.exclude) setExcludeItems(data.meta.items.exclude.length ? data.meta.items.exclude : ['Housing'])
+      try {
+        // Use the storage factory to get the current storage adapter
+        const store = await getStorage()
+        const data = await store.getPlan()
+        if (data?.meta) {
+          setLastMeta(data.meta)
+          if (data.meta.assumption) setAssumption(data.meta.assumption)
+          if (data.meta.items?.include) setIncludeItems(data.meta.items.include)
+          if (data.meta.items?.exclude) {
+            setExcludeItems(
+              data.meta.items.exclude.length ? data.meta.items.exclude : ['Housing']
+            )
+          }
+        }
+      } catch {
+        // ignore; UI will show empty state
       }
     })()
   }, [])
@@ -40,49 +57,80 @@ export default function UploadPanel({ onPlanSaved }:{ onPlanSaved: ()=>Promise<v
     setCsvText(text)
     setFilename(file.name)
 
-    // Ask server to quickly parse the CSV to show Items + Assumptions
-    const res = await fetch('/api/parse-csv', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ csv: text }),
-    }).then(r => r.json()).catch(() => null)
+    Papa.parse<CSVRow>(text, {
+      header: true,
+      dynamicTyping: true,
+      complete: (results: Papa.ParseResult<CSVRow>) => {
+        const rows = (results.data as any[]).filter(Boolean)
+        setParsedRows(rows)
 
-    setItems(res?.items || [])
-    setAssumptions(res?.assumptions || [])
-    // If server found assumptions, keep prefilled one if present; else pick first
-    if (res?.assumptions?.length && !res.assumptions.includes(assumption)) {
-      setAssumption(res.assumptions[0])
-    }
+        // Build item list from Accounts rows
+        const itemSet = new Set(
+          rows
+            .filter((r) => String(r['Category']).toLowerCase() === 'accounts')
+            .map((r) => String(r['Item']).trim())
+        )
+        const itemArr = Array.from(itemSet).sort()
+        setItems(itemArr)
+
+        // Collect available assumptions
+        const assumpSet = new Set(
+          rows.map((r) => String(r['Assumptions'] || '').trim()).filter(Boolean)
+        )
+        const assumpArr = Array.from(assumpSet)
+        setAssumptions(assumpArr)
+        if (assumpArr.length && !assumpArr.includes(assumption)) {
+          setAssumption(assumpArr[0]!)
+        }
+      },
+    })
   }
 
   async function onSave() {
-    if (!csvText) return alert('Select a CSV file first.')
+    if (!csvText || parsedRows.length === 0) {
+      alert('Select a CSV file first.')
+      return
+    }
 
-    await fetch('/api/plan-from-csv', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        csv: csvText,
-        filename,
-        assumption,
+    try {
+      console.log('Building plan from CSV...')
+      const planSeries = buildPlanFromCSV(parsedRows, {
+        selectedAssumption: assumption,
         includeItems,
         excludeItems,
-      }),
-    })
+      })
 
-    // Refresh meta after save (so UI shows the latest filename/time)
-    const data = await fetch('/api/plan').then(r => r.json()).catch(() => null)
-    if (data?.meta) setLastMeta(data.meta)
+      const store = await getStorage()
+      console.log('Saving plan to storage...')
+      await store.savePlan(planSeries, {
+        filename,
+        assumption,
+        items: { include: includeItems, exclude: excludeItems },
+      })
 
-    await onPlanSaved()
+      // Refresh meta after save
+      const data = await store.getPlan()
+      if (data?.meta) setLastMeta(data.meta)
+
+      await onPlanSaved()
+    } catch (e) {
+      console.error(e)
+      alert('Failed to save plan. Check the CSV format and try again.')
+    }
   }
 
   return (
     <div>
       {lastMeta && (
         <div className="help" style={{ marginBottom: 8 }}>
-          Last upload: <b>{lastMeta.filename}</b> · {new Date(lastMeta.uploaded_at).toLocaleString()}
-          {lastMeta.assumption ? <> · Assumption: <b>{lastMeta.assumption}</b></> : null}
+          Last upload: <b>{lastMeta.filename}</b> ·{' '}
+          {new Date(lastMeta.uploaded_at).toLocaleString()}
+          {lastMeta.assumption ? (
+            <>
+              {' '}
+              · Assumption: <b>{lastMeta.assumption}</b>
+            </>
+          ) : null}
         </div>
       )}
 
@@ -114,7 +162,7 @@ export default function UploadPanel({ onPlanSaved }:{ onPlanSaved: ()=>Promise<v
                     checked={checked}
                     onChange={(e) => {
                       const isChecked = e.target.checked
-                      // We keep includeItems optional; primary control is exclude list
+                      // Use exclude list as primary control
                       setExcludeItems((prev) => {
                         const s = new Set(prev)
                         if (isChecked) s.delete(it)

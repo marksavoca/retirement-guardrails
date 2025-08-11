@@ -10,6 +10,7 @@ import Modal from '../components/Modal'
 import { useGuardrails } from '../hooks/useGuardrails'
 import type { PlanPoint, ActualEntry } from '../lib/types'
 import { planValueAtDate, isoToday } from '../lib/guardrails'
+import { getStorage } from '../lib/storage/factory'
 
 type PageProps = {
   initialPlan: PlanPoint[]
@@ -17,7 +18,16 @@ type PageProps = {
   initialLastUpdated: string | null
 }
 
-export const getServerSideProps: GetServerSideProps<PageProps> = async () => {
+export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => {
+  const local =
+    process.env.NEXT_PUBLIC_STORAGE_MODE === 'local' ||
+    ctx.query.mode === 'local' // allow ?mode=local to force it
+
+  if (local) {
+    // In local mode, do not touch MariaDB; let the client load from browser DB
+    return { props: { initialPlan: [], initialActuals: [], initialLastUpdated: null } }
+  }
+
   const { getPool } = await import('../lib/db')
   const { toISO } = await import('../lib/date')
 
@@ -91,7 +101,8 @@ export default function Home({
   )
 
   async function handleDeleteActual(dateISO: string) {
-    await fetch('/api/actuals?date=' + encodeURIComponent(dateISO), { method: 'DELETE' })
+    const store = await getStorage()
+    await store.deleteActual(dateISO)
     await refetch()
   }
 
@@ -104,7 +115,7 @@ export default function Home({
             <h1 className="h1">Retirement Guardrails Monitor</h1>
             <p className="help">
               Track plan vs actuals with guardrails. Upload a Planner Summary CSV, tune thresholds, and
-              keep everything stored in MariaDB.
+              keep everything stored in MariaDB or fully local in your browser.
             </p>
           </div>
           <div className="row">
@@ -144,7 +155,6 @@ export default function Home({
           onSave={saveActual}
           onDelete={handleDeleteActual}
         />
-
       </div>
 
       {/* Settings modal */}
@@ -154,7 +164,7 @@ export default function Home({
           upperPct={upperPct}
           onClose={() => setShowSettings(false)}
           onSaved={async (lp, up) => {
-            await saveSettings(lp, up) // persist to DB
+            await saveSettings(lp, up) // persists via adapter
             setShowSettings(false)
           }}
         />
@@ -172,7 +182,9 @@ export default function Home({
         </Modal>
       )}
 
-      <footer>Plan & Actuals persist in MariaDB. Configure connection via <code>.env</code>.</footer>
+      <footer>
+        Storage mode: <code>{process.env.NEXT_PUBLIC_STORAGE_MODE === 'local' ? 'local (browser SQLite)' : 'hosted (MariaDB API)'}</code>. Configure via <code>.env.local</code> or <code>?mode=local</code>.
+      </footer>
     </div>
   )
 }
