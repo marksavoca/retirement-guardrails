@@ -165,7 +165,15 @@ export default function GuardrailsChart({
           <Line dataKey="lower" strokeDasharray="4 4" dot={false} connectNulls isAnimationActive={false} />
           <Line dataKey="upper" strokeDasharray="4 4" dot={false} connectNulls isAnimationActive={false} />
           {/* actuals with conditional dot color */}
-          <Scatter data={actualPoints} dataKey="y" name="Actual" shape={ActualDot} />
+          {/* <Scatter data={actualPoints} dataKey="y" name="Actual" shape={ActualDot} /> */}
+          {/* Actual points */}
+          <Scatter
+            data={actualPoints}
+            dataKey="y"
+            name="Actual"
+            shape={ActualDot}
+            isAnimationActive={false}
+          />
         </ComposedChart>
       </ResponsiveContainer>
     </div>
