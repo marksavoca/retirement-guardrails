@@ -18,16 +18,16 @@ type PageProps = {
   initialLastUpdated: string | null
 }
 
-export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => {
-  const local =
-    process.env.NEXT_PUBLIC_STORAGE_MODE === 'local' ||
-    ctx.query.mode === 'local' // allow ?mode=local to force it
+export const getServerSideProps: GetServerSideProps<PageProps> = async (_ctx) => {
+  const mode = (process.env.NEXT_PUBLIC_STORAGE_MODE || '').toLowerCase()
+  const isHosted = mode === 'remote' || mode === 'hosted' // hosted only when explicitly set
 
-  if (local) {
-    // In local mode, do not touch MariaDB; let the client load from browser DB
+  if (!isHosted) {
+    // Default: local mode — let the client load from IndexedDB
     return { props: { initialPlan: [], initialActuals: [], initialLastUpdated: null } }
   }
 
+  // Hosted (MariaDB) fetch
   const { getPool } = await import('../lib/db')
   const { toISO } = await import('../lib/date')
 
@@ -44,20 +44,20 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
       [name]
     )
 
-    const initialPlan: PlanPoint[] = (planRows as any[]).map((r) => ({
+    const initialPlan: PlanPoint[] = (planRows as any[]).map(r => ({
       date: toISO(r.date),
       plan_total_savings: Number(r.plan_total_savings),
     }))
 
-    const initialActuals: ActualEntry[] = (actualRows as any[]).map((r) => ({
+    const initialActuals: ActualEntry[] = (actualRows as any[]).map(r => ({
       date: toISO(r.date),
       actual_total_savings: Number(r.actual_total_savings),
     }))
 
     const latest =
       Math.max(
-        ...(planRows as any[]).map((r) => new Date(r.updated_at || 0).getTime() || 0),
-        ...(actualRows as any[]).map((r) => new Date(r.updated_at || 0).getTime() || 0)
+        ...(planRows as any[]).map(r => new Date(r.updated_at || 0).getTime() || 0),
+        ...(actualRows as any[]).map(r => new Date(r.updated_at || 0).getTime() || 0),
       ) || 0
 
     const initialLastUpdated = latest ? new Date(latest).toISOString() : null
