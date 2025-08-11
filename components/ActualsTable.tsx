@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { PlanPoint, ActualEntry } from '../lib/types'
 import { isoToday, toISO } from '../lib/date'
 import { guardrailStatus, planValueAtDate } from '../lib/guardrails'
@@ -16,14 +16,19 @@ export default function ActualsTable({
   actuals,
   lowerPct,
   upperPct,
-  onSave,
+  onAdd,
+  onEdit,
   onDelete,
 }: {
   plan: PlanPoint[]
   actuals: ActualEntry[]
   lowerPct: number
   upperPct: number
-  onSave: (dateISO: string, value: string) => Promise<void>
+  /** Create a new actual (or replace if you want). */
+  onAdd: (dateISO: string, value: string) => Promise<void>
+  /** Edit an existing actual. Receives the original date + the (possibly changed) new date. */
+  onEdit: (originalDateISO: string, newDateISO: string, value: string) => Promise<void>
+  /** Delete by date (ISO). */
   onDelete: (dateISO: string) => Promise<void>
 }) {
   const [menu, setMenu] = useState<{ open: boolean; x: number; y: number; date: string | null }>({
@@ -31,8 +36,12 @@ export default function ActualsTable({
   })
   const [showPanel, setShowPanel] = useState(false)
   const [mode, setMode] = useState<'add' | 'edit'>('add')
+
   const [dateISO, setDateISO] = useState<string>(isoToday())
   const [value, setValue] = useState<string>('')
+
+  // Keep the original date for edit mode so we can target the correct row
+  const originalDateRef = useRef<string | null>(null)
 
   const [showDelete, setShowDelete] = useState(false)
   const [deleteDate, setDeleteDate] = useState<string | null>(null)
@@ -49,7 +58,11 @@ export default function ActualsTable({
         <button
           className="btn"
           onClick={() => {
-            setMode('add'); setDateISO(isoToday()); setValue(''); setShowPanel(true)
+            setMode('add')
+            setDateISO(isoToday())
+            setValue('')
+            originalDateRef.current = null
+            setShowPanel(true)
           }}
         >
           + Add Actual
@@ -103,13 +116,21 @@ export default function ActualsTable({
           onClick={() => setMenu({ open: false, x: 0, y: 0, date: null })}
           style={{ position: 'fixed', inset: 0, zIndex: 40 }}
         >
-          <div className="menu" style={{ left: menu.x, top: menu.y, zIndex: 50 }} onClick={(e) => e.stopPropagation()}>
+          <div
+            className="menu"
+            style={{ left: menu.x, top: menu.y, zIndex: 50 }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               onClick={() => {
                 if (!menu.date) return
                 const current = sorted.find((x) => toISO(x.date) === menu.date)?.actual_total_savings ?? ''
-                setMode('edit'); setDateISO(menu.date); setValue(current === '' ? '' : '$' + Number(current).toLocaleString())
-                setShowPanel(true); setMenu({ open: false, x: 0, y: 0, date: null })
+                setMode('edit')
+                originalDateRef.current = menu.date  // <-- remember original
+                setDateISO(menu.date)
+                setValue(current === '' ? '' : '$' + Number(current).toLocaleString())
+                setShowPanel(true)
+                setMenu({ open: false, x: 0, y: 0, date: null })
               }}
             >
               Edit
@@ -117,7 +138,8 @@ export default function ActualsTable({
             <button
               onClick={() => {
                 if (!menu.date) return
-                setDeleteDate(menu.date); setShowDelete(true)
+                setDeleteDate(menu.date)
+                setShowDelete(true)
                 setMenu({ open: false, x: 0, y: 0, date: null })
               }}
             >
@@ -161,7 +183,11 @@ export default function ActualsTable({
               <button
                 className="btn"
                 onClick={async () => {
-                  await onSave(dateISO, value)
+                  if (mode === 'edit' && originalDateRef.current) {
+                    await onEdit(originalDateRef.current, dateISO, value)
+                  } else {
+                    await onAdd(dateISO, value)
+                  }
                   setShowPanel(false)
                 }}
               >

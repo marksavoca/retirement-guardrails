@@ -10,7 +10,6 @@ import Modal from '../components/Modal'
 import { useGuardrails } from '../hooks/useGuardrails'
 import type { PlanPoint, ActualEntry } from '../lib/types'
 import { planValueAtDate, isoToday } from '../lib/guardrails'
-import { getStorage } from '../lib/storage/factory'
 
 type PageProps = {
   initialPlan: PlanPoint[]
@@ -23,7 +22,7 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (_ctx) =>
   const isHosted = mode === 'remote' || mode === 'hosted' // hosted only when explicitly set
 
   if (!isHosted) {
-    // Default: local mode — let the client load from IndexedDB
+    // Default: local mode — let the client load from browser storage
     return { props: { initialPlan: [], initialActuals: [], initialLastUpdated: null } }
   }
 
@@ -44,20 +43,20 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (_ctx) =>
       [name]
     )
 
-    const initialPlan: PlanPoint[] = (planRows as any[]).map(r => ({
+    const initialPlan: PlanPoint[] = (planRows as any[]).map((r) => ({
       date: toISO(r.date),
       plan_total_savings: Number(r.plan_total_savings),
     }))
 
-    const initialActuals: ActualEntry[] = (actualRows as any[]).map(r => ({
+    const initialActuals: ActualEntry[] = (actualRows as any[]).map((r) => ({
       date: toISO(r.date),
       actual_total_savings: Number(r.actual_total_savings),
     }))
 
     const latest =
       Math.max(
-        ...(planRows as any[]).map(r => new Date(r.updated_at || 0).getTime() || 0),
-        ...(actualRows as any[]).map(r => new Date(r.updated_at || 0).getTime() || 0),
+        ...(planRows as any[]).map((r) => new Date(r.updated_at || 0).getTime() || 0),
+        ...(actualRows as any[]).map((r) => new Date(r.updated_at || 0).getTime() || 0)
       ) || 0
 
     const initialLastUpdated = latest ? new Date(latest).toISOString() : null
@@ -79,10 +78,12 @@ export default function Home({
     actuals,
     lowerPct,
     upperPct,
-    saveSettings,   // persisted guardrail settings
+    saveSettings,     // persist guardrail settings
     lastUpdated,
     refetch,
-    saveActual,
+    addActual,        // <-- use explicit add/edit/delete
+    editActual,
+    deleteActual,
   } = useGuardrails({
     initialPlan,
     initialActuals,
@@ -99,12 +100,6 @@ export default function Home({
     () => actuals.find((a) => a.date === todayISO),
     [actuals, todayISO]
   )
-
-  async function handleDeleteActual(dateISO: string) {
-    const store = await getStorage()
-    await store.deleteActual(dateISO)
-    await refetch()
-  }
 
   return (
     <div className="container">
@@ -152,8 +147,18 @@ export default function Home({
           actuals={actuals}
           lowerPct={lowerPct}
           upperPct={upperPct}
-          onSave={saveActual}
-          onDelete={handleDeleteActual}
+          onAdd={addActual}
+          onEdit={async (originalDateISO, newDateISO, value) => {
+            if (originalDateISO === newDateISO) {
+              // true in-place edit
+              await editActual(newDateISO, value)
+            } else {
+              // date changed → move the record
+              await deleteActual(originalDateISO)
+              await addActual(newDateISO, value)
+            }
+          }}
+          onDelete={deleteActual}
         />
       </div>
 
@@ -164,7 +169,7 @@ export default function Home({
           upperPct={upperPct}
           onClose={() => setShowSettings(false)}
           onSaved={async (lp, up) => {
-            await saveSettings(lp, up) // persists via adapter
+            await saveSettings(lp, up)
             setShowSettings(false)
           }}
         />
@@ -183,7 +188,7 @@ export default function Home({
       )}
 
       <footer>
-        Storage mode: <code>{process.env.NEXT_PUBLIC_STORAGE_MODE === 'local' ? 'local (browser SQLite)' : 'hosted (MariaDB API)'}</code>. Configure via <code>.env.local</code> or <code>?mode=local</code>.
+        Storage mode: <code>{process.env.NEXT_PUBLIC_STORAGE_MODE === 'local' ? 'local (IndexedDB)' : 'hosted (MariaDB API)'}</code>. Configure via <code>.env.local</code>.
       </footer>
     </div>
   )

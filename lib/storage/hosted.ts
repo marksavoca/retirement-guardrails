@@ -12,7 +12,6 @@ export class HostedStorage implements Storage {
   }
 
   async savePlan(series: PlanPoint[], meta?: any) {
-    // Save series and optional meta via your existing API
     await fetch('/api/plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -22,7 +21,10 @@ export class HostedStorage implements Storage {
 
   async getActuals() {
     const r = await fetch('/api/actuals').then(r => r.json()).catch(() => null)
-    return { actuals: r?.actuals ?? [], lastUpdated: r?.lastUpdated ?? null }
+    return {
+      actuals: r?.actuals ?? [],
+      lastUpdated: r?.lastUpdated ?? null,
+    }
   }
 
   async upsertActual(dateISO: string, value: number) {
@@ -33,8 +35,16 @@ export class HostedStorage implements Storage {
     })
   }
 
+  async updateActual(dateISO: string, value: number) {
+    await fetch(`/api/actuals/${encodeURIComponent(dateISO)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actual_total_savings: Number(value) }),
+    })
+  }
+
   async deleteActual(dateISO: string) {
-    await fetch('/api/actuals?date=' + encodeURIComponent(dateISO), { method: 'DELETE' })
+    await fetch(`/api/actuals/${encodeURIComponent(dateISO)}`, { method: 'DELETE' })
   }
 
   async getSettings() {
