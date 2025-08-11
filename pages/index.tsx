@@ -1,3 +1,4 @@
+// pages/index.tsx
 import { useMemo, useState } from 'react'
 import type { GetServerSideProps } from 'next'
 
@@ -19,24 +20,22 @@ type PageProps = {
 
 export const getServerSideProps: GetServerSideProps<PageProps> = async (_ctx) => {
   const mode = (process.env.NEXT_PUBLIC_STORAGE_MODE || '').toLowerCase()
-  const isHosted = mode === 'remote' || mode === 'hosted' // hosted only when explicitly set
-
+  const isHosted = mode === 'remote' || mode === 'hosted'
   if (!isHosted) {
-    // Default: local mode — let the client load from browser storage
     return { props: { initialPlan: [], initialActuals: [], initialLastUpdated: null } }
   }
 
-  // Hosted (MariaDB) fetch
   const { getPool } = await import('../lib/db')
   const { toISO } = await import('../lib/date')
 
   const pool = getPool()
   try {
     const name = process.env.PLAN_NAME || 'default'
+    const assumption = 'Average'
 
     const [planRows]: any = await pool.query(
-      'SELECT date, plan_total_savings, updated_at FROM plans WHERE name = ? ORDER BY date',
-      [name]
+      'SELECT date, plan_total_savings, updated_at FROM plans WHERE name = ? AND assumption = ? ORDER BY date',
+      [name, assumption]
     )
     const [actualRows]: any = await pool.query(
       'SELECT date, actual_total_savings, updated_at FROM actuals WHERE name = ? ORDER BY date',
@@ -47,7 +46,6 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (_ctx) =>
       date: toISO(r.date),
       plan_total_savings: Number(r.plan_total_savings),
     }))
-
     const initialActuals: ActualEntry[] = (actualRows as any[]).map((r) => ({
       date: toISO(r.date),
       actual_total_savings: Number(r.actual_total_savings),
@@ -76,12 +74,15 @@ export default function Home({
   const {
     plan,
     actuals,
+    assumptions,
+    assumption,
+    setAssumption,
     lowerPct,
     upperPct,
-    saveSettings,     // persist guardrail settings
+    saveSettings,
     lastUpdated,
     refetch,
-    addActual,        // <-- use explicit add/edit/delete
+    addActual,
     editActual,
     deleteActual,
   } = useGuardrails({
@@ -93,7 +94,6 @@ export default function Home({
   const [showSettings, setShowSettings] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
 
-  // Optional: quick “today” snapshot
   const todayISO = isoToday()
   const todaysPlan = useMemo(() => planValueAtDate(plan, todayISO), [plan, todayISO])
   const todaysActual = useMemo(
@@ -123,15 +123,29 @@ export default function Home({
         </div>
       </div>
 
-      {/* Chart */}
+      {/* Chart + assumption selector */}
       <div className="card">
-        <h2 className="h2">Chart</h2>
+        <div className="row" style={{ marginBottom: 8, alignItems: 'center', gap: 8 }}>
+          <h2 className="h2" style={{ margin: 0 }}>Chart</h2>
+          <span className="help" style={{ marginLeft: 'auto' }}>Assumption:</span>
+          <select
+            className="input"
+            value={assumption}
+            onChange={(e) => setAssumption(e.target.value)}
+          >
+            {(assumptions.length ? assumptions : ['Pessimistic', 'Average', 'Optimistic']).map((a) => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
+        </div>
+
         <GuardrailsChart
           plan={plan}
           actuals={actuals}
           lowerPct={lowerPct}
           upperPct={upperPct}
         />
+
         {todaysPlan != null && todaysActual && (
           <div style={{ marginTop: 10 }} className="help">
             Today — plan: <b>${Number(todaysPlan).toLocaleString()}</b>, actual:{' '}
@@ -148,15 +162,9 @@ export default function Home({
           lowerPct={lowerPct}
           upperPct={upperPct}
           onAdd={addActual}
-          onEdit={async (originalDateISO, newDateISO, value) => {
-            if (originalDateISO === newDateISO) {
-              // true in-place edit
-              await editActual(newDateISO, value)
-            } else {
-              // date changed → move the record
-              await deleteActual(originalDateISO)
-              await addActual(newDateISO, value)
-            }
+          onEdit={async (oldD, newD, val) => {
+            if (oldD === newD) await editActual(newD, val)
+            else { await deleteActual(oldD); await addActual(newD, val) }
           }}
           onDelete={deleteActual}
         />
@@ -168,10 +176,7 @@ export default function Home({
           lowerPct={lowerPct}
           upperPct={upperPct}
           onClose={() => setShowSettings(false)}
-          onSaved={async (lp, up) => {
-            await saveSettings(lp, up)
-            setShowSettings(false)
-          }}
+          onSaved={async (lp, up) => { await saveSettings(lp, up); setShowSettings(false) }}
         />
       )}
 
@@ -188,7 +193,9 @@ export default function Home({
       )}
 
       <footer>
-        Storage mode: <code>{process.env.NEXT_PUBLIC_STORAGE_MODE === 'local' ? 'local (IndexedDB)' : 'hosted (MariaDB API)'}</code>. Configure via <code>.env.local</code>.
+        Storage mode:{' '}
+        <code>{(process.env.NEXT_PUBLIC_STORAGE_MODE || '').toLowerCase().match(/^(remote|hosted)$/) ? 'hosted (MariaDB API)' : 'local (IndexedDB)'}</code>.
+        Configure via <code>.env.local</code>.
       </footer>
     </div>
   )

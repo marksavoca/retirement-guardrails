@@ -30,3 +30,32 @@ footer { color: #64748b; font-size: 12px; text-align: center; margin-top: 12px; 
 .modal { background: white; border-radius: 16px; padding: 20px; min-width: 360px; box-shadow: 0 20px 50px rgba(0,0,0,0.25); }
 .modal .title { font-weight: 700; font-size: 18px; margin: 0 0 12px; }
 .modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+/* Badges */
+.badge {
+  display:inline-block;
+  font-size:12px;
+  line-height:1;
+  padding:6px 10px;
+  border-radius:9999px;
+  border:1px solid transparent;
+  font-weight:600;
+}
+
+/* Within guardrails */
+.badge.neutral { color:#1f2937; background: #f3f4f6; border-color:#e5e7eb; }
+/* Above guardrail (good) */
+.badge.success { color:#166534; background:#dcfce7; border-color:#86efac; }
+/* Below guardrail (bad) */
+.badge.danger  { color:#991b1b; background:#fee2e2; border-color:#fecaca; }
+
+/* Optional subtle row highlighting to match badge */
+table.table tr.success td { background: #f0fdf4; }
+table.table tr.danger  td { background: #fef2f2; }
+table.table tr.neutral td { background: #f3f4f6; }
+
+/* Keep text readable on highlights */
+table.table tr.success td,
+table.table tr.neutral td,
+table.table tr.danger td { color: #0f172a; }
+

@@ -1,30 +1,28 @@
 // lib/storage/local-indexeddb.ts
 import Dexie, { Table } from 'dexie'
-import type { Storage as AppStorage } from './types'
-
-type PlanPoint = { date: string; plan_total_savings: number }
-type ActualEntry = { date: string; actual_total_savings: number }
-type PlanMeta = {
-  filename: string
-  assumption: string | null
-  items?: { include: string[]; exclude: string[] }
-  uploaded_at: string
-} | null
+import type { Storage as AppStorage, PlanPoint, ActualEntry, PlanMeta } from './types'
 
 const PLAN = 'default'
-
-// Normalize anything to "YYYY-MM-DD"
 const norm = (d: string) =>
-  typeof d === 'string'
-    ? (d.length >= 10 ? d.slice(0, 10) : new Date(d).toISOString().slice(0, 10))
-    : new Date(d).toISOString().slice(0, 10)
+  (d && d.length >= 10 ? d.slice(0, 10) : new Date(d).toISOString().slice(0, 10))
 
-interface PlanRow {
+// Legacy v1 shape (no assumption key)
+interface OldPlanRow {
   name: string
   date: string
   plan_total_savings: number
   updated_at: number
 }
+
+// New v2 shape (with assumption key)
+interface PlanRowV2 {
+  name: string
+  assumption: string
+  date: string
+  plan_total_savings: number
+  updated_at: number
+}
+
 interface ActualRow {
   name: string
   date: string
@@ -41,22 +39,58 @@ interface UploadRow {
   id?: number
   name: string
   filename: string
-  assumption: string | null
-  items?: { include: string[]; exclude: string[] }
+  items?: { include: string[]; exclude: string[] } | null
   uploaded_at: number
 }
 
 class GuardrailsDB extends Dexie {
-  plans!: Table<PlanRow, [string, string]>
+  // v1 legacy (optional, removed in v3)
+  plans?: Table<OldPlanRow, [string, string]>
+  // v2 current
+  plansV2!: Table<PlanRowV2, [string, string, string]>
   actuals!: Table<ActualRow, [string, string]>
   settings!: Table<SettingsRow, string>
   plan_uploads!: Table<UploadRow, number>
 
   constructor() {
     super('guardrails')
-    // Compound primary keys: [name+date]
+
+    // v1 legacy schema
     this.version(1).stores({
       plans:        '[name+date], name, date, updated_at',
+      actuals:      '[name+date], name, date, updated_at',
+      settings:     'name, updated_at',
+      plan_uploads: '++id, name, uploaded_at',
+    })
+
+    // v2: introduce plansV2 with assumption; migrate if old table exists
+    this.version(2).stores({
+      plansV2:      '[name+assumption+date], name, assumption, date, updated_at',
+      actuals:      '[name+date], name, date, updated_at',
+      settings:     'name, updated_at',
+      plan_uploads: '++id, name, uploaded_at',
+    }).upgrade(async (tx) => {
+      try {
+        const old = await (tx as any).table('plans').toArray() as OldPlanRow[]
+        const now = Date.now()
+        for (const r of old) {
+          await tx.table('plansV2').put({
+            name: r.name ?? PLAN,
+            assumption: 'Average',
+            date: norm(r.date),
+            plan_total_savings: Number(r.plan_total_savings ?? 0),
+            updated_at: r.updated_at ?? now,
+          } as PlanRowV2)
+        }
+      } catch {
+        // no legacy table — fine
+      }
+    })
+
+    // v3: drop legacy 'plans'
+    this.version(3).stores({
+      plans:        null,
+      plansV2:      '[name+assumption+date], name, assumption, date, updated_at',
       actuals:      '[name+date], name, date, updated_at',
       settings:     'name, updated_at',
       plan_uploads: '++id, name, uploaded_at',
@@ -65,178 +99,131 @@ class GuardrailsDB extends Dexie {
 }
 const db = new GuardrailsDB()
 
-// --- Helpers that respect legacy, non-normalized dates ---
-async function findActualByNormDate(name: string, dateISO: string) {
-  const d = norm(dateISO)
-  return db.actuals
-    .where('name')
-    .equals(name)
-    .and(r => norm(r.date) === d)
-    .first()
-}
-async function deleteActualByNormDate(name: string, dateISO: string) {
-  const d = norm(dateISO)
-  const rows = await db.actuals
-    .where('name')
-    .equals(name)
-    .and(r => norm(r.date) === d)
-    .toArray()
-  await Promise.all(rows.map(r => db.actuals.delete([r.name, r.date] as any)))
-}
-async function migrateNormalizeDates() {
-  // Normalize ACTUALS keys
-  const acts = await db.actuals.where('name').equals(PLAN).toArray()
-  for (const r of acts) {
-    const nd = norm(r.date)
-    if (nd !== r.date) {
-      // If a normalized record already exists, keep the latest value
-      const existing = await db.actuals.get([r.name, nd] as any)
-      if (!existing || existing.updated_at <= r.updated_at) {
-        await db.actuals.put({
-          name: r.name,
-          date: nd,
-          actual_total_savings: r.actual_total_savings,
-          updated_at: r.updated_at,
-        })
-      }
-      await db.actuals.delete([r.name, r.date] as any)
-    }
-  }
-  // Normalize PLANS keys
-  const plans = await db.plans.where('name').equals(PLAN).toArray()
-  for (const r of plans) {
-    const nd = norm(r.date)
-    if (nd !== r.date) {
-      const existing = await db.plans.get([r.name, nd] as any)
-      if (!existing || existing.updated_at <= r.updated_at) {
-        await db.plans.put({
-          name: r.name,
-          date: nd,
-          plan_total_savings: r.plan_total_savings,
-          updated_at: r.updated_at,
-        })
-      }
-      await db.plans.delete([r.name, r.date] as any)
-    }
-  }
-}
-
 export class LocalIndexedDbStorage implements AppStorage {
-  static async create() {
-    // one-time normalization to fix legacy keys with timestamps
-    await migrateNormalizeDates().catch(() => {})
-    return new LocalIndexedDbStorage()
-  }
+  static async create() { return new LocalIndexedDbStorage() }
 
-  async getPlan() {
-    const rows = await db.plans.where('name').equals(PLAN).toArray()
+  // ---------- Plans ----------
+  async getPlan(assumption = 'Average') {
+    const rows = await db.plansV2
+      .where('[name+assumption+date]')
+      .between([PLAN, assumption, '0000-00-00'], [PLAN, assumption, '9999-12-31'])
+      .toArray()
+
     rows.sort((a, b) => a.date.localeCompare(b.date))
+
     const series: PlanPoint[] = rows.map(r => ({
-      date: norm(r.date),
+      date: r.date,
       plan_total_savings: r.plan_total_savings,
     }))
+
+    const all = await db.plansV2.where('name').equals(PLAN).toArray()
+    const assumptions = Array.from(new Set(all.map(r => r.assumption))).sort()
+
+    const lastUpdated = rows.length
+      ? new Date(Math.max(...rows.map(r => r.updated_at || 0))).toISOString()
+      : null
+
     const uploads = await db.plan_uploads.where('name').equals(PLAN).toArray()
     uploads.sort((a, b) => (a.uploaded_at || 0) - (b.uploaded_at || 0))
     const last = uploads.at(-1) || null
     const meta: PlanMeta = last
       ? {
           filename: last.filename,
-          assumption: last.assumption,
-          items: last.items,
+          assumption: null,
+          items: last.items ?? { include: [], exclude: ['Housing'] },
           uploaded_at: new Date(last.uploaded_at).toISOString(),
         }
       : null
-    const lastUpdated =
-      rows.length ? new Date(Math.max(...rows.map(r => r.updated_at))).toISOString() : null
-    return { series, lastUpdated, meta }
+
+    return { series, lastUpdated, meta, assumptions }
   }
 
-  async savePlan(
-    series: PlanPoint[],
-    meta?: { filename?: string; assumption?: string | null; items?: { include: string[]; exclude: string[] } }
+  async getPlanAssumptions() {
+    const rows = await db.plansV2.where('name').equals(PLAN).toArray()
+    return Array.from(new Set(rows.map(r => r.assumption))).sort()
+  }
+
+  async savePlans(
+    seriesByAssumption: Record<string, PlanPoint[]>,
+    opts?: { replace?: boolean; meta?: { filename?: string; items?: { include: string[]; exclude: string[] } } }
   ) {
+    const { replace = true, meta } = opts || {}
     const now = Date.now()
-    await db.transaction('rw', db.plans, db.plan_uploads, async () => {
-      const existing = await db.plans.where('name').equals(PLAN).toArray()
-      await Promise.all(existing.map(r => db.plans.delete([r.name, r.date] as any)))
-      for (const p of series) {
-        await db.plans.put({
-          name: PLAN,
-          date: norm(p.date),
-          plan_total_savings: Number(p.plan_total_savings),
-          updated_at: now,
-        })
+
+    await db.transaction('rw', db.plansV2, db.plan_uploads, async () => {
+      if (replace) {
+        // Wipe existing plans for this name
+        const existing = await db.plansV2.where('name').equals(PLAN).toArray()
+        for (const r of existing) {
+          await db.plansV2.delete([r.name, r.assumption, r.date] as any)
+        }
       }
+
+      let wrote = 0
+      for (const [assump, series] of Object.entries(seriesByAssumption)) {
+        if (!Array.isArray(series) || series.length === 0) continue
+        for (const p of series) {
+          await db.plansV2.put({
+            name: PLAN,
+            assumption: assump,
+            date: norm(p.date),
+            plan_total_savings: Number(p.plan_total_savings),
+            updated_at: now,
+          })
+          wrote++
+        }
+      }
+
       if (meta?.filename) {
         await db.plan_uploads.add({
           name: PLAN,
           filename: meta.filename,
-          assumption: meta.assumption ?? null,
-          items: meta.items,
+          items: meta.items ?? null,
           uploaded_at: now,
         })
       }
+
+      if (wrote === 0) {
+        throw new Error('No plan rows were written (empty seriesByAssumption)')
+      }
     })
   }
 
+  // ---------- Actuals ----------
   async getActuals() {
     const rows = await db.actuals.where('name').equals(PLAN).toArray()
-    // coalesce by normalized date (if any legacy dupes remain)
-    const map = new Map<string, ActualRow>()
-    for (const r of rows) {
-      const k = norm(r.date)
-      const prev = map.get(k)
-      if (!prev || prev.updated_at <= r.updated_at) {
-        map.set(k, { ...r, date: k })
-      }
-    }
-    const list = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date))
-    const actuals: ActualEntry[] = list.map(r => ({
+    rows.sort((a,b)=>a.date.localeCompare(b.date))
+    const actuals: ActualEntry[] = rows.map(r => ({
       date: r.date,
       actual_total_savings: r.actual_total_savings,
     }))
-    const lastUpdated =
-      list.length ? new Date(Math.max(...list.map(r => r.updated_at))).toISOString() : null
+    const lastUpdated = rows.length
+      ? new Date(Math.max(...rows.map(r => r.updated_at || 0))).toISOString()
+      : null
     return { actuals, lastUpdated }
   }
 
-  // create/replace
   async upsertActual(dateISO: string, value: number) {
-    const d = norm(dateISO)
-    // remove any legacy/duplicate keys first
-    await deleteActualByNormDate(PLAN, d).catch(() => {})
     await db.actuals.put({
       name: PLAN,
-      date: d,
+      date: norm(dateISO),
       actual_total_savings: Number(value),
       updated_at: Date.now(),
     })
   }
 
-  // edit existing only (no insert). If legacy key exists, it is replaced in-place.
   async updateActual(dateISO: string, value: number) {
-    console.log("update actual", dateISO, value)
-    const d = norm(dateISO)
-    const existing = await findActualByNormDate(PLAN, d)
-    console.log("existing", existing)
+    const key = [PLAN, norm(dateISO)] as any
+    const existing = await db.actuals.get(key)
     if (!existing) throw new Error('Not found')
-    if (existing.date !== d) {
-      // rekey from legacy timestamped date to normalized date
-      console.log("delete legacy date", existing.date)
-      await db.actuals.delete([existing.name, existing.date] as any)
-    }
-    await db.actuals.put({
-      name: PLAN,
-      date: d,
-      actual_total_savings: Number(value),
-      updated_at: Date.now(),
-    })
+    await db.actuals.put({ ...existing, actual_total_savings: Number(value), updated_at: Date.now() })
   }
 
   async deleteActual(dateISO: string) {
-    await deleteActualByNormDate(PLAN, dateISO)
+    await db.actuals.delete([PLAN, norm(dateISO)] as any)
   }
 
+  // ---------- Settings ----------
   async getSettings() {
     const row = await db.settings.get(PLAN)
     if (!row) return { lowerPct: 10, upperPct: 15 }

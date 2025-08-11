@@ -1,55 +1,67 @@
+// pages/api/plan.ts
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { getPool } from '../../lib/db'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const pool = getPool()
   const planName = process.env.PLAN_NAME || 'default'
-
-  if (req.method === 'POST') {
-    const { series, replace, meta } = req.body || {}
-    if (!Array.isArray(series)) return res.status(400).json({ error: 'series required' })
-    const conn = await pool.getConnection()
-    try {
-      await conn.beginTransaction()
-      if (replace) await conn.execute('DELETE FROM plans WHERE name = ?', [planName])
-      for (const row of series) {
-        await conn.execute('INSERT INTO plans (name, date, plan_total_savings) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE plan_total_savings=VALUES(plan_total_savings)',
-          [planName, row.date, Number(row.plan_total_savings)])
-      }
-      if (meta && meta.filename) {
-        await conn.execute('INSERT INTO plan_uploads (name, filename, assumption, items_selected) VALUES (?, ?, ?, ?)',
-          [planName, String(meta.filename), meta.assumption || null, JSON.stringify({ include: meta.includeItems || [], exclude: meta.excludeItems || [] })])
-      }
-      await conn.commit()
-      res.json({ ok: true, count: series.length })
-    } catch (e:any) {
-      await conn.rollback()
-      res.status(500).json({ error: e.message })
-    } finally { conn.release() }
-    return
-  }
+  const pool = getPool()
 
   if (req.method === 'GET') {
-    const [rows]: any = await pool.query('SELECT date, plan_total_savings, updated_at FROM plans WHERE name = ? ORDER BY date', [planName])
-    const series = rows.map((r: any) => ({
-      date: typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().slice(0,10),
-      plan_total_savings: Number(r.plan_total_savings),
-      updated_at: typeof r.updated_at === 'string' ? r.updated_at : new Date(r.updated_at).toISOString(),
-    }))
-    const [lu]: any = await pool.query('SELECT MAX(updated_at) as lastUpdated FROM plans WHERE name = ?', [planName])
-    const [metaRows]: any = await pool.query('SELECT filename, assumption, items_selected, uploaded_at FROM plan_uploads WHERE name = ? ORDER BY uploaded_at DESC LIMIT 1', [planName])
-    const meta = metaRows?.[0] ? {
-      filename: metaRows[0].filename,
-      assumption: metaRows[0].assumption || null,
-      items: safeParseJSON(metaRows[0].items_selected),
-      uploaded_at: typeof metaRows[0].uploaded_at === 'string' ? metaRows[0].uploaded_at : new Date(metaRows[0].uploaded_at).toISOString()
-    } : null
-    res.json({ series, lastUpdated: lu[0]?.lastUpdated || null, meta })
+    const assumption = String(req.query.assumption || 'Average')
+    const [rows]: any = await pool.query(
+      'SELECT date, plan_total_savings, updated_at FROM plans WHERE name = ? AND assumption = ? ORDER BY date',
+      [planName, assumption]
+    ).catch(()=>[[]] as any)
+
+    const [assRows]: any = await pool.query(
+      'SELECT DISTINCT assumption FROM plans WHERE name = ? ORDER BY assumption',
+      [planName]
+    ).catch(()=>[[]] as any)
+
+    const series = (rows as any[]).map(r => ({ date: r.date instanceof Date ? r.date.toISOString().slice(0,10) : String(r.date).slice(0,10), plan_total_savings: Number(r.plan_total_savings) }))
+    const lastUpdated = (rows as any[]).length ? new Date(Math.max(...(rows as any[]).map(r => new Date(r.updated_at||0).getTime() || 0))).toISOString() : null
+    const assumptions = (assRows as any[]).map(r => String(r.assumption)).filter(Boolean)
+
+    res.json({ series, lastUpdated, assumptions })
     return
   }
 
-  res.setHeader('Allow', 'GET,POST')
-  res.status(405).end('Method Not Allowed')
-}
+  if (req.method === 'POST') {
+    const { seriesByAssumption, replace, meta } = req.body || {}
+    if (!seriesByAssumption || typeof seriesByAssumption !== 'object') {
+      res.status(400).json({ error: 'seriesByAssumption required' }); return
+    }
+    await pool.query('START TRANSACTION')
+    try {
+      if (replace) {
+        await pool.query('DELETE FROM plans WHERE name = ?', [planName])
+      }
+      const now = new Date()
+      for (const [assump, series] of Object.entries(seriesByAssumption as Record<string, any[]>)) {
+        for (const p of series) {
+          await pool.query(
+            'INSERT INTO plans (name, assumption, date, plan_total_savings, updated_at) VALUES (?, ?, ?, ?, ?)',
+            [planName, assump, p.date, Number(p.plan_total_savings), now]
+          )
+        }
+      }
+      // optional meta table
+      if (meta?.filename) {
+        await pool.query(
+          'INSERT INTO plan_uploads (name, filename, items, uploaded_at) VALUES (?, ?, ?, ?)',
+          [planName, meta.filename, JSON.stringify(meta.items ?? null), now]
+        ).catch(()=>{})
+      }
+      await pool.query('COMMIT')
+      res.status(204).end()
+    } catch (e) {
+      await pool.query('ROLLBACK')
+      console.error('plan POST failed', e)
+      res.status(500).json({ error: 'failed to save plans' })
+    }
+    return
+  }
 
-function safeParseJSON(v:any){ try{ return JSON.parse(v) }catch{ return { include:[], exclude:[] } } }
+  res.setHeader('Allow', 'GET, POST')
+  res.status(405).end()
+}

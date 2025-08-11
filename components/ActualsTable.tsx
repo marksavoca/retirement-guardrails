@@ -1,14 +1,14 @@
+// components/ActualsTable.tsx
 import { useMemo, useRef, useState } from 'react'
 import { PlanPoint, ActualEntry } from '../lib/types'
-import { isoToday, toISO } from '../lib/date'
-import { guardrailStatus, planValueAtDate } from '../lib/guardrails'
+import { toISO, isoToday } from '../lib/date'
+import { planValueAtDate, guardrailStatus } from '../lib/guardrails'
 
 /** "$1,234,567" while typing */
 function formatCurrencyTyping(raw: string): string {
   const digits = raw.replace(/\D/g, '')
   if (!digits) return ''
-  const withCommas = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  return '$' + withCommas
+  return '$' + digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
 export default function ActualsTable({
@@ -24,32 +24,30 @@ export default function ActualsTable({
   actuals: ActualEntry[]
   lowerPct: number
   upperPct: number
-  /** Create a new actual (or replace if you want). */
-  onAdd: (dateISO: string, value: string) => Promise<void>
-  /** Edit an existing actual. Receives the original date + the (possibly changed) new date. */
-  onEdit: (originalDateISO: string, newDateISO: string, value: string) => Promise<void>
-  /** Delete by date (ISO). */
-  onDelete: (dateISO: string) => Promise<void>
+  onAdd: (dateISO: string, value: string) => Promise<void> | void
+  onEdit: (originalDateISO: string, newDateISO: string, value: string) => Promise<void> | void
+  onDelete: (dateISO: string) => Promise<void> | void
 }) {
-  const [menu, setMenu] = useState<{ open: boolean; x: number; y: number; date: string | null }>({
-    open: false, x: 0, y: 0, date: null,
-  })
-  const [showPanel, setShowPanel] = useState(false)
-  const [mode, setMode] = useState<'add' | 'edit'>('add')
-
-  const [dateISO, setDateISO] = useState<string>(isoToday())
-  const [value, setValue] = useState<string>('')
-
-  // Keep the original date for edit mode so we can target the correct row
-  const originalDateRef = useRef<string | null>(null)
-
-  const [showDelete, setShowDelete] = useState(false)
-  const [deleteDate, setDeleteDate] = useState<string | null>(null)
-
   const sorted = useMemo(
     () => [...actuals].sort((a, b) => toISO(a.date).localeCompare(toISO(b.date))),
     [actuals]
   )
+
+  // Kebab menu state
+  const [menu, setMenu] = useState<{ open: boolean; x: number; y: number; date: string | null }>({
+    open: false, x: 0, y: 0, date: null,
+  })
+
+  // Add/Edit modal state
+  const [showPanel, setShowPanel] = useState(false)
+  const [mode, setMode] = useState<'add' | 'edit'>('add')
+  const [dateISO, setDateISO] = useState<string>(isoToday())
+  const [value, setValue] = useState<string>('')
+  const originalDateRef = useRef<string | null>(null)
+
+  // Delete modal state
+  const [showDelete, setShowDelete] = useState(false)
+  const [deleteDate, setDeleteDate] = useState<string | null>(null)
 
   return (
     <div>
@@ -83,12 +81,16 @@ export default function ActualsTable({
             const iso = toISO(a.date)
             const planVal = planValueAtDate(plan, iso)
             let badge: JSX.Element | null = null
+            let rowClass = ''
+
             if (planVal != null) {
               const s = guardrailStatus(planVal, Number(a.actual_total_savings), lowerPct, upperPct)
               badge = <span className={`badge ${s.className}`}>{s.status}</span>
+              rowClass = s.className // 'success' | 'danger' | 'neutral'
             }
+
             return (
-              <tr key={iso}>
+              <tr key={iso} className={rowClass}>
                 <td>{iso}</td>
                 <td>${Number(a.actual_total_savings).toLocaleString()}</td>
                 <td>{badge ?? <span className="help">—</span>}</td>
@@ -97,7 +99,7 @@ export default function ActualsTable({
                     className="kebab"
                     aria-label={'Actions for ' + iso}
                     onClick={(e) => {
-                      const r = (e.target as HTMLElement).getBoundingClientRect()
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
                       setMenu({ open: true, x: r.left, y: r.bottom + 4, date: iso })
                     }}
                   >
@@ -110,7 +112,7 @@ export default function ActualsTable({
         </tbody>
       </table>
 
-      {/* kebab menu */}
+      {/* Kebab menu */}
       {menu.open && (
         <div
           onClick={() => setMenu({ open: false, x: 0, y: 0, date: null })}
@@ -124,9 +126,9 @@ export default function ActualsTable({
             <button
               onClick={() => {
                 if (!menu.date) return
-                const current = sorted.find((x) => toISO(x.date) === menu.date)?.actual_total_savings ?? ''
+                const current = sorted.find(x => toISO(x.date) === menu.date)?.actual_total_savings ?? ''
                 setMode('edit')
-                originalDateRef.current = menu.date  // <-- remember original
+                originalDateRef.current = menu.date
                 setDateISO(menu.date)
                 setValue(current === '' ? '' : '$' + Number(current).toLocaleString())
                 setShowPanel(true)
@@ -177,9 +179,7 @@ export default function ActualsTable({
             </div>
 
             <div className="actions">
-              <button className="btn ghost" onClick={() => setShowPanel(false)}>
-                Cancel
-              </button>
+              <button className="btn ghost" onClick={() => setShowPanel(false)}>Cancel</button>
               <button
                 className="btn"
                 onClick={async () => {
@@ -204,12 +204,10 @@ export default function ActualsTable({
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="title">Delete Actual</div>
             <p className="help" style={{ marginTop: 0 }}>
-              Are you sure you want to delete the actual for <b>{deleteDate}</b>? This action can’t be undone.
+              Delete the actual for <b>{deleteDate}</b>? This can’t be undone.
             </p>
             <div className="actions">
-              <button className="btn ghost" onClick={() => setShowDelete(false)}>
-                Cancel
-              </button>
+              <button className="btn ghost" onClick={() => setShowDelete(false)}>Cancel</button>
               <button
                 className="btn danger"
                 onClick={async () => {

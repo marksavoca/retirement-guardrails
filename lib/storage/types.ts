@@ -9,17 +9,17 @@ export type PlanMeta = {
 } | null
 
 export interface Storage {
-  // Plan series and optional meta
-  getPlan(): Promise<{ series: PlanPoint[]; lastUpdated: string | null; meta?: PlanMeta }>
-  savePlan(
-    series: PlanPoint[],
-    meta?: { filename?: string; assumption?: string | null; items?: { include: string[]; exclude: string[] } }
-  ): Promise<void>
+  // Plans
+  getPlan(assumption?: string): Promise<{ series: PlanPoint[]; lastUpdated: string | null; meta?: PlanMeta; assumptions?: string[] }>
+  /** Save a full set of series keyed by assumption name (e.g., Pessimistic/Average/Optimistic). Replaces existing if replace=true. */
+  savePlans(seriesByAssumption: Record<string, PlanPoint[]>, opts?: { replace?: boolean; meta?: { filename?: string; items?: { include: string[]; exclude: string[] } } }): Promise<void>
+  /** List the assumptions currently stored. */
+  getPlanAssumptions(): Promise<string[]>
 
   // Actuals
   getActuals(): Promise<{ actuals: ActualEntry[]; lastUpdated: string | null }>
-  upsertActual(dateISO: string, value: number): Promise<void>   // create/replace
-  updateActual(dateISO: string, value: number): Promise<void>   // edit existing only
+  upsertActual(dateISO: string, value: number): Promise<void>
+  updateActual(dateISO: string, value: number): Promise<void>
   deleteActual(dateISO: string): Promise<void>
 
   // Guardrail settings
