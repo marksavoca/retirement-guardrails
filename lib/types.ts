@@ -1,0 +1,1 @@
+export type PlanPoint={date:string;plan_total_savings:number};export type ActualEntry={date:string;actual_total_savings:number};

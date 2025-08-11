@@ -1,0 +1,53 @@
+CREATE DATABASE IF NOT EXISTS guardrails CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+USE guardrails;
+
+/* Tables */
+CREATE TABLE IF NOT EXISTS plans (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL DEFAULT 'default',
+  date DATE NOT NULL,
+  plan_total_savings DECIMAL(18,2) NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_plan_name_date (name, date)
+);
+
+CREATE TABLE IF NOT EXISTS actuals (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL DEFAULT 'default',
+  date DATE NOT NULL,
+  actual_total_savings DECIMAL(18,2) NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_actual_name_date (name, date)
+);
+
+CREATE TABLE IF NOT EXISTS plan_uploads (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL DEFAULT 'default',
+  filename VARCHAR(500) NOT NULL,
+  assumption VARCHAR(255) DEFAULT NULL,
+  items_selected JSON NOT NULL,
+  uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL DEFAULT 'default',
+  lower_pct DOUBLE NOT NULL DEFAULT 10,
+  upper_pct DOUBLE NOT NULL DEFAULT 15,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_settings_name (name)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  name        VARCHAR(255) NOT NULL,
+  lower_pct   INT NOT NULL,
+  upper_pct   INT NOT NULL,
+  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+              ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (name)
+);
+
+/* Optional: create a dedicated app user (adjust password!) */
+-- CREATE USER IF NOT EXISTS 'guardrails'@'localhost' IDENTIFIED BY 'grPass123!';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON guardrails.* TO 'guardrails'@'localhost';
+-- FLUSH PRIVILEGES;

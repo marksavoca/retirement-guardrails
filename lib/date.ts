@@ -1,0 +1,1 @@
+export const toISO=(d:string|Date)=>typeof d==='string'?d.slice(0,10):new Date(d).toISOString().slice(0,10);export const isoToday=()=>new Date().toISOString().slice(0,10);

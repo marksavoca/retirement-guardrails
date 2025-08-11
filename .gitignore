@@ -1,0 +1,16 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Env & local secrets
+.env
+.env.local
+.env.*.local
+
+# Misc local
+uploads/
