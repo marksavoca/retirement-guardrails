@@ -101,6 +101,16 @@ export default function Home({
     [actuals, todayISO]
   )
 
+  // Expose handlers for KebabMenu overlay
+  if (typeof window !== 'undefined') {
+    (window as any).__openUpload = () => setShowUpload(true);
+    (window as any).__closeUpload = () => setShowUpload(false);
+    (window as any).__getAssumption = () => assumption;
+    (window as any).__getAssumptions = () => assumptions;
+    (window as any).__setAssumption = (a: string) => setAssumption(a);
+    (window as any).__openSettings = () => setShowSettings(true);
+  }
+
   return (
     <div className="container">
       {/* Top bar */}
@@ -113,13 +123,6 @@ export default function Home({
               keep everything stored in MariaDB or fully local in your browser.
             </p>
           </div>
-          <div className="row">
-            <div className="help" style={{ alignSelf: 'center', marginRight: 8 }}>
-              Last updated: {lastUpdated ? new Date(lastUpdated).toLocaleString() : '—'}
-            </div>
-            <button className="btn ghost" onClick={() => setShowUpload(true)}>📤 Upload CSV</button>
-            <button className="btn ghost" onClick={() => setShowSettings(true)}>⚙ Settings</button>
-          </div>
         </div>
       </div>
 
@@ -127,16 +130,6 @@ export default function Home({
       <div className="card">
         <div className="row" style={{ marginBottom: 8, alignItems: 'center', gap: 8 }}>
           <h2 className="h2" style={{ margin: 0 }}>Chart</h2>
-          <span className="help" style={{ marginLeft: 'auto' }}>Assumption:</span>
-          <select
-            className="input"
-            value={assumption}
-            onChange={(e) => setAssumption(e.target.value)}
-          >
-            {(assumptions.length ? assumptions : ['Pessimistic', 'Average', 'Optimistic']).map((a) => (
-              <option key={a} value={a}>{a}</option>
-            ))}
-          </select>
         </div>
 
         <GuardrailsChart
@@ -191,6 +184,7 @@ export default function Home({
           />
         </Modal>
       )}
+
 
       <footer>
         Storage mode:{' '}

@@ -11,6 +11,7 @@ import {
 import { useMemo, useState } from 'react'
 import type { PlanPoint, ActualEntry } from '../lib/types'
 import { planValueAtDate } from '../lib/guardrails'
+import KebabMenu from './KebabMenu'
 
 const toISO = (d: string | Date) => {
   if (typeof d !== 'string') return new Date(d).toISOString().slice(0, 10)
@@ -124,7 +125,8 @@ export default function GuardrailsChart({
   }, [plan, actuals, lowerPct, upperPct])
 
   return (
-    <div style={{ width: '100%', height: 420 }}>
+    <div style={{ width: '100%', height: 420, position:'relative' }}>
+      <KebabMenu onUpload={() => (window as any).__openUpload?.()} onSettings={() => (window as any).__openSettings?.()} />
       <ResponsiveContainer>
         <ComposedChart
           data={baseData}
