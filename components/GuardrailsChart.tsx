@@ -10,7 +10,6 @@ import {
 } from 'recharts'
 import { PlanPoint, ActualEntry } from '../lib/types'
 import { planValueAtDate } from '../lib/guardrails'
-import KebabMenu from './KebabMenu'
 
 const toISO = (d: string | Date) =>
   typeof d === 'string' ? d.slice(0, 10) : new Date(d).toISOString().slice(0, 10)
@@ -132,7 +131,6 @@ export default function GuardrailsChart({
 
   return (
     <div style={{ width: '100%', height: 420, position:'relative' }}>
-      <KebabMenu onUpload={() => (window as any).__openUpload?.()} onSettings={() => (window as any).__openSettings?.()} />
       <ResponsiveContainer>
         <ComposedChart
           data={frame}

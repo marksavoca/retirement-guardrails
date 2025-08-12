@@ -12,6 +12,7 @@ import { useGuardrails } from '../hooks/useGuardrails'
 import type { PlanPoint, ActualEntry } from '../lib/types'
 import { planValueAtDate, isoToday } from '../lib/guardrails'
 import Header from '../components/Header'
+import KebabMenu from '../components/KebabMenu'
 
 type PageProps = {
   initialPlan: PlanPoint[]
@@ -29,7 +30,7 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (_ctx) =>
   const { getPool } = await import('../lib/db')
   const { toISO } = await import('../lib/date')
   const { assumptions, assumption, setAssumption } = useGuardrails({});
-  
+
   const pool = getPool()
 
   try {
@@ -122,10 +123,20 @@ export default function Home({
 
       {/* Chart + assumption selector */}
       <div className="card">
-        <div className="row" style={{ marginBottom: 8, alignItems: 'center', gap: 8 }}>
+        <div
+          className="row"
+          style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}
+        >
           <h2 className="h2">
             Chart {assumption ? `(${assumption})` : ''}
           </h2>
+          {/* right-aligned kebab */}
+          <div style={{ marginLeft: 'auto', position: 'relative' }}>
+            <KebabMenu
+              onUpload={() => (window as any).__openUpload?.()}
+              onSettings={() => (window as any).__openSettings?.()}
+            />
+          </div>
         </div>
 
         <GuardrailsChart

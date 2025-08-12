@@ -1,10 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+type KebabMenuProps = {
+  onUpload: () => void;
+  onSettings: () => void;
+};
+
 export default function KebabMenu({
   onUpload,
   onSettings,
-  }
-) {
+}: KebabMenuProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
 
@@ -18,7 +22,7 @@ export default function KebabMenu({
   }, [])
 
   return (
-    <div ref={ref} style={{ position: 'absolute', right: 8, top: 8, zIndex: 10 }}>
+    <div ref={ref} style={{ position: 'relative', right: 8, top: 8, zIndex: 10 }}>
       <button
         aria-label="Menu"
         onClick={() => setOpen(v => !v)}
