@@ -11,6 +11,7 @@ import Modal from '../components/Modal'
 import { useGuardrails } from '../hooks/useGuardrails'
 import type { PlanPoint, ActualEntry } from '../lib/types'
 import { planValueAtDate, isoToday } from '../lib/guardrails'
+import Header from '../components/Header'
 
 type PageProps = {
   initialPlan: PlanPoint[]
@@ -113,18 +114,9 @@ export default function Home({
 
   return (
     <div className="container">
-      {/* Top bar */}
-      <div className="card">
-        <div className="row spread">
-          <div>
-            <h1 className="h1">Retirement Guardrails Monitor</h1>
-            <p className="help">
-              Track plan vs actuals with guardrails. Upload a Planner Summary CSV, tune thresholds, and
-              keep everything stored in MariaDB or fully local in your browser.
-            </p>
-          </div>
-        </div>
-      </div>
+       <Header
+       />
+      
 
       {/* Chart + assumption selector */}
       <div className="card">

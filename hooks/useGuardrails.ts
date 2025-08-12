@@ -18,8 +18,9 @@ export function useGuardrails({
   const [plan, setPlan] = useState<PlanPoint[]>(initialPlan)
   const [actuals, setActuals] = useState<ActualEntry[]>(initialActuals)
 
-  const [assumptions, setAssumptions] = useState<Array<string>>([])
-  const [assumption, setAssumption] = useState<string>('Average')
+  type AssumptionType = 'Pessimistic' | 'Average' | 'Optimistic' | string
+  const [assumptions, setAssumptions] = useState<AssumptionType[]>([])
+  const [assumption, setAssumption] = useState<AssumptionType>('Average')
 
   const [lowerPct, setLowerPct] = useState<number>(10)
   const [upperPct, setUpperPct] = useState<number>(15)
@@ -33,9 +34,9 @@ export function useGuardrails({
       // assumptions list + pick default
       const list = await store.getPlanAssumptions().catch(()=>[])
       if (list && list.length) {
-        setAssumptions(list)
+        setAssumptions(list as AssumptionType[])
         if (list.includes('Average')) setAssumption('Average')
-        else setAssumption(list[0]!)
+        else setAssumption(list[0] as AssumptionType)
       } else {
         setAssumptions(['Pessimistic','Average','Optimistic'])
       }
