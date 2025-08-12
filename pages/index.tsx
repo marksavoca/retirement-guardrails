@@ -28,8 +28,10 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (_ctx) =>
 
   const { getPool } = await import('../lib/db')
   const { toISO } = await import('../lib/date')
-
+  const { assumptions, assumption, setAssumption } = useGuardrails({});
+  
   const pool = getPool()
+
   try {
     const name = process.env.PLAN_NAME || 'default'
     const assumption = 'Average'
@@ -121,7 +123,9 @@ export default function Home({
       {/* Chart + assumption selector */}
       <div className="card">
         <div className="row" style={{ marginBottom: 8, alignItems: 'center', gap: 8 }}>
-          <h2 className="h2" style={{ margin: 0 }}>Chart</h2>
+          <h2 className="h2">
+            Chart {assumption ? `(${assumption})` : ''}
+          </h2>
         </div>
 
         <GuardrailsChart
