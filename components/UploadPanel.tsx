@@ -12,7 +12,13 @@ type PlanMeta = {
 
 type BoldinRow = Record<string, string | number>
 
-export default function UploadPanel({ onPlanSaved }:{ onPlanSaved: ()=>Promise<void>|void }) {
+export default function UploadPanel({
+  onPlanSaved,
+  onCancel,
+}: {
+  onPlanSaved: () => Promise<void> | void
+  onCancel?: () => void
+}) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [effectiveFrom, setEffectiveFrom] = useState<string>('')
   const [csvText, setCsvText] = useState('')
@@ -24,6 +30,8 @@ export default function UploadPanel({ onPlanSaved }:{ onPlanSaved: ()=>Promise<v
   const [excludeItems, setExcludeItems] = useState<string[]>(['Housing'])
 
   const [lastMeta, setLastMeta] = useState<PlanMeta>(null)
+  const [saving, setSaving] = useState(false)
+  const fileChosen = !!filename
 
   useEffect(() => {
     (async () => {
@@ -64,7 +72,9 @@ export default function UploadPanel({ onPlanSaved }:{ onPlanSaved: ()=>Promise<v
   }
 
   async function onSave() {
-    if (!csvText || parsedRows.length === 0) return alert('Select a CSV file first.')
+    //if (!csvText || parsedRows.length === 0) return alert('Select a CSV file first.')
+    if (!fileChosen || !parsedRows.length) return
+    setSaving(true)
     const store = await getStorage()
 
     // Build plan series for all assumptions from Boldin rows (respect include/exclude)
@@ -126,6 +136,11 @@ export default function UploadPanel({ onPlanSaved }:{ onPlanSaved: ()=>Promise<v
     await onPlanSaved()
   }
 
+  const handleCancel = () => {
+    if (onCancel) onCancel();
+    else (window as any).__closeUpload?.();
+  };
+
   return (
     <div style={{ maxWidth: 520 }}>
       {lastMeta && (
@@ -155,6 +170,7 @@ export default function UploadPanel({ onPlanSaved }:{ onPlanSaved: ()=>Promise<v
         </div>
       </div>
 
+      {/* Item selector stays conditional */}
       {items.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div className="help">Select items to include (default excludes <b>Housing</b>).</div>
@@ -181,13 +197,22 @@ export default function UploadPanel({ onPlanSaved }:{ onPlanSaved: ()=>Promise<v
               )
             })}
           </div>
-
-          <div className="row right" style={{ marginTop: 8, gap: 8 }}>
-            <button className="btn ghost" onClick={() => (window as any).__closeUpload?.()}>Cancel</button>
-            <button className="btn" disabled={!csvText} onClick={onSave}>Build & Save Plans</button>
-          </div>
         </div>
       )}
+
+      {/* Actions: always visible */}
+      <div className="row" style={{ marginTop: 18, justifyContent: 'flex-end', gap: 8 }}>
+        <button className="btn ghost" onClick={handleCancel}>Cancel</button>
+        <button
+          className="btn"
+          onClick={onSave}
+          disabled={!fileChosen || saving}                 // ← disabled until a file is chosen
+          title={!fileChosen ? 'Choose a CSV first' : undefined}
+        >
+          {saving ? 'Saving…' : 'Build & Save Plan'}
+        </button>
+      </div>
+
     </div>
   )
 }
