@@ -35,35 +35,58 @@ export function guardrailStatus(
   return { status: 'Within guardrails', className: 'neutral', lower, upper }
 }
 
-/**
- * Interpolating plan lookup.
- * Returns the plan value at an arbitrary date, using linear interpolation
- * between the surrounding plan points. Clamps on both ends.
- */
-export function planValueAtDate(plan: PlanPoint[], dateISO: string): number | null {
-  if (!plan || plan.length === 0) return null
+const parseDay = (iso: string) => {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    const [, y, mo, d] = m;
+    return Date.UTC(Number(y), Number(mo) - 1, Number(d));
+  }
+  const dt = new Date(iso);
+  return Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
+};
 
+const toNum = (v: unknown) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+export function planValueAtDate(plan: PlanPoint[], iso: string): number | null {
+  if (!plan?.length) return null;
+  const t = parseDay(iso);
+
+  // Accept both shapes: { value } or { plan_total_savings }
   const pts = plan
-    .map(p => ({ t: new Date(p.date).getTime(), v: Number(p.plan_total_savings) }))
-    .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v))
-    .sort((a, b) => a.t - b.t)
+    .map(p => {
+      const v =
+        toNum((p as any).value) ??
+        toNum((p as any).plan_total_savings);
+      const date = (p as any).date as string | undefined;
+      if (v == null || !date) return null;
+      return { t: parseDay(date), v };
+    })
+    .filter((x): x is { t: number; v: number } => x != null) // <-- type guard
+    .sort((a, b) => a.t - b.t);
 
-  if (pts.length === 0) return null
+  if (!pts.length) return null;
 
-  const t = new Date(dateISO).getTime()
-  if (!Number.isFinite(t)) return null
+  // outside range → keep null so the line doesn’t extend past ends
+  if (t < pts[0].t || t > pts[pts.length - 1].t) return null;
 
-  // clamp
-  if (t <= pts[0].t) return pts[0].v
-  if (t >= pts[pts.length - 1].t) return pts[pts.length - 1].v
+  // exact match
+  for (const p of pts) if (p.t === t) return p.v;
 
-  // find bracketing points (lo < t <= hi)
-  let hi = 1
-  while (hi < pts.length && t > pts[hi].t) hi++
-  const lo = hi - 1
+  // find bracket [a,b]
+  let a = pts[0], b = pts[pts.length - 1];
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (pts[i].t <= t && t <= pts[i + 1].t) {
+      a = pts[i];
+      b = pts[i + 1];
+      break;
+    }
+  }
+  if (a.t === b.t) return a.v;
 
-  const p0 = pts[lo]
-  const p1 = pts[hi]
-  const r = (t - p0.t) / (p1.t - p0.t) // 0..1
-  return p0.v + r * (p1.v - p0.v)
+  // linear interpolation
+  const r = (t - a.t) / (b.t - a.t);
+  return a.v + (b.v - a.v) * r;
 }

@@ -7,6 +7,7 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  DefaultTooltipContent
 } from 'recharts'
 import { useMemo, useState } from 'react'
 import type { PlanPoint, ActualEntry } from '../lib/types'
@@ -22,6 +23,67 @@ const toISO = (d: string | Date) => {
   }
   return d.slice(0, 10)
 }
+
+const fmtUSD = (n: unknown) =>
+  (Number.isFinite(Number(n))
+    ? Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+    : '—');
+
+function HoverOnlyTooltip({ active, label, payload }: any) {
+  if (!active || !payload?.length) return null;
+
+  // Normalize to a canonical set (prefer Hover values if both exist)
+  const pick = new Map<string, any>();
+  const preferHover = (key: string, p: any) => {
+    const cur = pick.get(key);
+    const isHover = String(p.dataKey).endsWith('Hover');
+    if (!cur || isHover) pick.set(key, p);
+  };
+
+  console.log('tooltip payload', payload);
+
+  for (const p of payload) {
+    const dk = String(p.dataKey);
+    if (dk === 'planHover' || dk === 'plan') preferHover('plan', p);
+    else if (dk === 'lowerHover' || dk === 'lower') preferHover('lower', p);
+    else if (dk === 'upperHover' || dk === 'upper') preferHover('upper', p);
+    else if (dk === 'y') preferHover('y', p); // Actuals
+  }
+
+  const rows = ['plan', 'y', 'lower', 'upper'].map(k => pick.get(k)).filter(Boolean);
+  if (!rows.length) return null;
+
+  const iso = new Date(Number(label)).toISOString().slice(0, 10);
+
+  return (
+    <div
+      className="recharts-default-tooltip"
+      style={{
+        background: '#fff',
+        border: '1px solid rgba(0,0,0,.15)',
+        padding: '8px 10px',
+        borderRadius: 6,
+        boxShadow: '0 6px 18px rgba(0,0,0,.12)',
+        pointerEvents: 'none',
+      }}
+    >
+      <p className="recharts-tooltip-label" style={{ margin: 0, marginBottom: 6 }}>{iso}</p>
+      {rows.map((p: any) => (
+        <div key={p.dataKey}>
+          <span>
+            {p.name ||
+              (p.dataKey === 'y' ? 'Actual'
+               : p.dataKey.toString().startsWith('plan') ? 'Plan'
+               : p.dataKey.toString().startsWith('lower') ? 'Lower guardrail'
+               : 'Upper guardrail')}:&nbsp;
+          </span>
+          <span>{fmtUSD(p.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 
 // choose a "nice" step so we show ~12 ticks max (1/2/5/10/20/…)
 function pickYearStep(spanY: number, target = 12) {
@@ -44,8 +106,9 @@ export default function GuardrailsChart({
   upperPct: number
 }) {
   const [hoverISO, setHoverISO] = useState<string | null>(null)
+  
 
-  const { baseData, actualPoints, xDomain, xTicks, yDomain } = useMemo(() => {
+  const { baseData, actualPoints, xDomain, xTicks, yDomain, hoverData } = useMemo(() => {
     const dateSet = new Set<string>([
       ...plan.map(p => toISO(p.date)),
       ...actuals.map(a => toISO(a.date)),
@@ -102,6 +165,7 @@ export default function GuardrailsChart({
         xTicks.push(Date.UTC(y, 0, 1))
       }
     }
+    
 
     // Y domain with padding
     const vals = [
@@ -121,7 +185,14 @@ export default function GuardrailsChart({
         ? frame
         : points.map(p => ({ t: p.t, date: p.date, plan: null, lower: null, upper: null }))
 
-    return { baseData, actualPoints: points, xDomain, xTicks, yDomain }
+    const hoverData = baseData.map(d => ({
+      t: d.t,
+      planHover: d.plan,
+      lowerHover: d.lower,
+      upperHover: d.upper,
+    }))
+
+    return { baseData, actualPoints: points, xDomain, xTicks, yDomain, hoverData }
   }, [plan, actuals, lowerPct, upperPct])
 
   return (
@@ -141,28 +212,39 @@ export default function GuardrailsChart({
           <XAxis
             dataKey="t"
             type="number"
+            scale="time"                
             domain={xDomain as any}
             allowDataOverflow
-            ticks={xTicks}              // precomputed ticks
-            interval={0}                // draw all in ticks[]
-            minTickGap={10}             // extra insurance
+            ticks={xTicks}
+            interval={0}
+            minTickGap={10}
             tickMargin={8}
             tickFormatter={t => new Date(Number(t)).getUTCFullYear().toString()}
             padding={{ left: 10, right: 10 }}
           />
+
           <YAxis
             domain={yDomain as any}
             tickMargin={8}
             tickFormatter={v => '$' + Number(v).toLocaleString()}
           />
-          <Tooltip
-            labelFormatter={t => new Date(Number(t)).toISOString().slice(0, 10)}
-            formatter={v => '$' + Number(v).toLocaleString()}
+
+         <Tooltip
+            shared
+            content={<HoverOnlyTooltip />}
+            cursor={{ strokeDasharray: '3 3' }}
           />
 
-          <Line type="monotone" dataKey="plan" dot={false} connectNulls isAnimationActive={false} />
-          <Line type="monotone" dataKey="lower" strokeDasharray="4 4" dot={false} connectNulls isAnimationActive={false} />
-          <Line type="monotone" dataKey="upper" strokeDasharray="4 4" dot={false} connectNulls isAnimationActive={false} />
+          <Line type="monotone" dataKey="plan"  name="Plan"            dot={false} activeDot={{ r: 3 }} connectNulls isAnimationActive={false} />
+          <Line type="monotone" dataKey="lower" name="Lower guardrail" strokeDasharray="4 4" dot={false} activeDot={{ r: 3 }} connectNulls isAnimationActive={false} />
+          <Line type="monotone" dataKey="upper" name="Upper guardrail" strokeDasharray="4 4" dot={false} activeDot={{ r: 3 }} connectNulls isAnimationActive={false} />
+
+          {/* invisible hover targets */}
+          <Scatter data={hoverData} dataKey="planHover"  name="Plan"            opacity={0} isAnimationActive={false} />
+          <Scatter data={hoverData} dataKey="lowerHover" name="Lower guardrail" opacity={0} isAnimationActive={false} />
+          <Scatter data={hoverData} dataKey="upperHover" name="Upper guardrail" opacity={0} isAnimationActive={false} />
+
+          {/* actuals (visible) */}
           <Scatter data={actualPoints} dataKey="y" name="Actual" isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
