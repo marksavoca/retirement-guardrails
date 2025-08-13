@@ -51,22 +51,33 @@ export default function GuardrailsChart({
   onHoverDate?: (iso: string) => void
 }) {
   const { frame, actualPoints, planProbe, xDomain, yDomain, ticks, actualMap } = useMemo(() => {
-    const planDates = plan.map(p => toISO(p.date))
-    const minISO = planDates[0] ?? toISO(actuals[0]?.date ?? new Date())
-    const maxISO = planDates[planDates.length - 1] ?? toISO(actuals[actuals.length - 1]?.date ?? minISO)
+  // Maps for quick lookups
+  const planDateMap = new Map(
+    plan.map(p => [toISO(p.date), Number((p as any).plan_total_savings ?? (p as any).value)])
+  );
+  const actualMap = new Map(actuals.map(a => [toISO(a.date), Number(a.actual_total_savings)]));
 
-    const timeline = monthlyBetween(minISO, maxISO)
-    const frame = timeline.map(d => {
-      const t = ms(d)
-      const pv = planValueAtDate(plan, d)
-      return {
-        t,
-        date: d,
-        plan: pv,
-        lower: pv != null ? pv * (1 - lowerPct / 100) : null,
-        upper: pv != null ? pv * (1 + upperPct / 100) : null,
-      }
-    })
+  // Union of plan anchor dates and actual dates (no monthly fill)
+  const dateSet = new Set<string>([
+    ...Array.from(planDateMap.keys()),
+    ...Array.from(actualMap.keys()),
+  ]);
+  const allDates = Array.from(dateSet).sort();
+
+  // Build rows: plan exists only on anchor dates; straight segments connect anchors
+  const frame = allDates.map(d => {
+    const t  = ms(d);
+    const pv = planDateMap.get(d) ?? null;
+    return {
+      t,
+      date: d,
+      plan:  pv,
+      lower: pv != null ? pv * (1 - lowerPct / 100) : null,
+      upper: pv != null ? pv * (1 + upperPct / 100) : null,
+      // optional: attach actual to the same grid if you prefer using dataKey="actual"
+      // actual: actualMap.get(d) ?? null,
+    };
+  });
 
     const actualPoints = actuals
       .map(a => {
@@ -80,25 +91,29 @@ export default function GuardrailsChart({
       })
       .sort((a, b) => a.t - b.t)
 
-    const planProbe = frame
-      .filter(r => r.plan != null)
-      .map(r => ({ t: r.t, y: r.plan as number }))
+    // Invisible probe only at plan anchors (optional; keeps hover at anchors)
+  const planProbe = frame
+    .filter(r => r.plan != null)
+    .map(r => ({ t: r.t, y: r.plan as number }));
 
-    const actualMap = new Map(actuals.map(a => [toISO(a.date), Number(a.actual_total_savings)]))
+  // Axes
+  const minISO = allDates[0] ?? toISO(new Date());
+  const maxISO = allDates[allDates.length - 1] ?? minISO;
+  const ticks  = yearTicks(minISO, maxISO);
+  const xDomain: [number, number] = [ms(minISO), ms(maxISO)];
 
-    const planVals = frame.flatMap(r => [r.plan, r.lower, r.upper].filter(v => v != null)) as number[]
-    const actualVals = actualPoints.map(p => p.y)
-    const allVals = [...planVals, ...actualVals]
-    const pad = (min: number, max: number) => {
-      const span = Math.max(1, max - min)
-      return [Math.floor(min - 0.08 * span), Math.ceil(max + 0.08 * span)] as const
-    }
-    const yDomain = allVals.length ? pad(Math.min(...allVals), Math.max(...allVals)) : (['auto','auto'] as const)
-    const xDomain: [number, number] = [ms(minISO), ms(maxISO)]
-    const ticks = yearTicks(minISO, maxISO)
+  // Y domain from plan anchors + actuals
+  const planVals = frame.flatMap(r => [r.plan, r.lower, r.upper].filter(v => v != null)) as number[];
+  const actualVals = actualPoints.map(p => p.y);
+  const allVals = [...planVals, ...actualVals];
+  const pad = (min: number, max: number) => {
+    const span = Math.max(1, max - min);
+    return [Math.floor(min - 0.08 * span), Math.ceil(max + 0.08 * span)] as const;
+  };
+  const yDomain = allVals.length ? pad(Math.min(...allVals), Math.max(...allVals)) : (['auto','auto'] as const);
 
-    return { frame, actualPoints, planProbe, xDomain, yDomain, ticks, actualMap }
-  }, [plan, actuals, lowerPct, upperPct])
+  return { frame, actualPoints, planProbe, xDomain, yDomain, ticks, actualMap };
+}, [plan, actuals, lowerPct, upperPct]);
 
   const CustomTooltip = ({ active, label }: any) => {
     if (!active || label == null) return null
@@ -158,14 +173,19 @@ export default function GuardrailsChart({
             domain={yDomain as any}
             tickFormatter={(v) => '$' + Number(v).toLocaleString()}
           />
-          {/* invisible hover targets along plan */}
-          <Scatter data={planProbe} name="probe" fill="transparent" stroke="transparent" />
           <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
-          <Line dataKey="plan" dot={false} connectNulls isAnimationActive={false} />
-          <Line dataKey="lower" strokeDasharray="4 4" dot={false} connectNulls isAnimationActive={false} />
-          <Line dataKey="upper" strokeDasharray="4 4" dot={false} connectNulls isAnimationActive={false} />
-          {/* actuals with conditional dot color */}
+
+          {/* draw plan/rails at anchors only; connect across gaps */}
+          <Line dataKey="plan"  type="linear" dot activeDot={false} connectNulls isAnimationActive={false} />
+          <Line dataKey="lower" type="linear" strokeDasharray="4 4" dot={false} activeDot={false} connectNulls isAnimationActive={false} />
+          <Line dataKey="upper" type="linear" strokeDasharray="4 4" dot={false} activeDot={false} connectNulls isAnimationActive={false} />
+
+          {/* hover targets at anchors only (optional) */}
+          <Scatter data={planProbe} name="probe" fill="transparent" stroke="transparent" />
+
+          {/* actuals (visible) */}
           <Scatter data={actualPoints} dataKey="y" name="Actual" shape={ActualDot} />
+          
         </ComposedChart>
       </ResponsiveContainer>
     </div>
