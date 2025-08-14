@@ -25,7 +25,7 @@ export default function UploadPanel({
   const [parsedRows, setParsedRows] = useState<any[]>([])
   const [filename, setFilename] = useState('')
 
-  const [items, setItems] = useState<string[]>([])
+  const [itemsSavings, setItems] = useState<string[]>([])
   const [includeItems, setIncludeItems] = useState<string[]>([])
   const [excludeItems, setExcludeItems] = useState<string[]>(['Housing'])
 
@@ -171,11 +171,11 @@ export default function UploadPanel({
       </div>
 
       {/* Item selector stays conditional */}
-      {items.length > 0 && (
+      {itemsSavings.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div className="help">Select items to include (default excludes <b>Housing</b>).</div>
           <div style={{ marginTop: 6 }}>
-            {items.map((it) => {
+            {itemsSavings.map((it) => {
               const checked =
                 !excludeItems.includes(it) && (includeItems.length === 0 || includeItems.includes(it))
               return (
