@@ -125,23 +125,15 @@ export default function Home({
     [expActuals, todayISO]
   )
 
-  // Expose handlers for KebabMenu overlay
-  useEffect(() => {
-    (window as any).__openUpload = () => setShowUpload(true)
-    (window as any).__closeUpload = () => setShowUpload(false)
-    (window as any).__getAssumption = () => assumption
-    (window as any).__getAssumptions = () => assumptions
-    (window as any).__setAssumption = (a: string) => setAssumption(a)
-    (window as any).__openSettings = () => setShowSettings(true)
-    return () => {
-      delete (window as any).__openUpload
-      delete (window as any).__closeUpload
-      delete (window as any).__getAssumption
-      delete (window as any).__getAssumptions
-      delete (window as any).__setAssumption
-      delete (window as any).__openSettings
-    }
-  }, [assumption, assumptions, setAssumption])
+     // Expose handlers for KebabMenu overlay
+  if (typeof window !== 'undefined') {
+    (window as any).__openUpload = () => setShowUpload(true);
+    (window as any).__closeUpload = () => setShowUpload(false);
+    (window as any).__getAssumption = () => assumption;
+    (window as any).__getAssumptions = () => assumptions;
+    (window as any).__setAssumption = (a: string) => setAssumption(a);
+    (window as any).__openSettings = () => setShowSettings(true);
+  }
 
   return (
     <div className="container">
